@@ -1,11 +1,13 @@
-use crate::{models::user_model::User, repository::mongodb_repo::MongoRepo};
-use mongodb::{bson::oid::ObjectId, results::InsertOneResult};
-use rocket::{http::Status, response::status::Custom, serde::json::Json, State};
+use crate::{
+    helpers::message::message_fn, models::user_model::User, repository::mongodb_repo::MongoRepo,
+};
+use mongodb::results::InsertOneResult;
+use rocket::{http::Status, serde::json::Json, State};
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
 pub struct ErrorMessage {
-    message: String,
+    pub message: String,
 }
 
 #[get("/")]
@@ -14,10 +16,10 @@ pub fn hello(db: &State<MongoRepo>) -> Result<Json<String>, Status> {
 }
 
 #[post("/register", data = "<new_user>")]
-pub fn user_register(
+pub fn register_user(
     db: &State<MongoRepo>,
     new_user: Json<User>,
-) -> Result<Json<InsertOneResult>, Status> {
+) -> Result<Json<InsertOneResult>, Json<ErrorMessage>> {
     let data = User {
         id: None,
         username: new_user.username.to_owned(),
@@ -32,57 +34,58 @@ pub fn user_register(
     let user_detail = db.register_user(data);
     match user_detail {
         Ok(user) => Ok(Json(user)),
-        Err(_) => Err(Status::InternalServerError),
+        Err(e) => Err(message_fn(e.to_string())),
     }
 }
 
 #[get("/all")]
-pub fn get_all_users(db: &State<MongoRepo>) -> Result<Json<Vec<User>>, Status> {
+pub fn get_all_users(db: &State<MongoRepo>) -> Result<Json<Vec<User>>, Json<ErrorMessage>> {
     let users = db.get_all_users();
     match users {
         Ok(users) => Ok(Json(users)),
-        Err(_) => Err(Status::InternalServerError),
+        Err(e) => Err(message_fn(e.to_string())),
     }
 }
 
 #[get("/id/<id>")]
-pub fn get_user(db: &State<MongoRepo>, id: String) -> Result<Json<User>, Status> {
+pub fn get_user(db: &State<MongoRepo>, id: String) -> Result<Json<User>, Json<ErrorMessage>> {
     if id.is_empty() {
-        return Err(Status::BadRequest);
+        return Err(message_fn("Email cannot be empty".to_string()));
     };
     let user_detail = db.get_user(&id);
     match user_detail {
         Ok(user) => Ok(Json(user)),
-        Err(_) => Err(Status::InternalServerError),
+        Err(e) => Err(message_fn(e.to_string())),
     }
 }
 
 #[get("/email/<email>")]
-pub fn get_user_using_email(db: &State<MongoRepo>, email: String) -> Result<Json<User>, Status> {
+pub fn get_user_using_email(
+    db: &State<MongoRepo>,
+    email: String,
+) -> Result<Json<User>, Json<ErrorMessage>> {
     if email.is_empty() {
-        return Err(Status::BadRequest);
+        return Err(message_fn("Email cannot be empty".to_string()));
     };
 
     match db.get_user_using_email(&email) {
         Ok(user) => Ok(Json(user)),
-        Err(_) => Err(Status::InternalServerError),
+        Err(e) => Err(message_fn(e.to_string())),
     }
 }
 
 #[post("/login", data = "<login_data>")]
-pub fn user_login(db: &State<MongoRepo>, login_data: Json<User>) -> Result<Json<String>, Json<ErrorMessage>> {
+pub fn user_login(
+    db: &State<MongoRepo>,
+    login_data: Json<User>,
+) -> Result<Json<String>, Json<ErrorMessage>> {
     let email = login_data.email.to_string();
     let provided_password = login_data.password.to_string();
 
-    let login_status = db.user_login(&email, &provided_password);
+    let login_details = db.user_login(&email, &provided_password);
 
-    match login_status {
+    match login_details {
         Ok(user) => Ok(Json(user.to_string())),
-        Err(_) => {
-            let error_message = ErrorMessage {
-                message: "Login failed".to_string(),
-            };
-            Err(Json(error_message))
-        }
+        Err(e) => Err(message_fn(e.to_string())),
     }
 }

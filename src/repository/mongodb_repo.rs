@@ -5,23 +5,18 @@ use bcrypt::{hash, verify, DEFAULT_COST};
 use dotenv::dotenv;
 
 use mongodb::{
-    bson::{self, bson, doc, extjson::de::Error, oid::ObjectId},
-    error::Error as MongoError,
-    results::{DeleteResult, InsertOneResult, UpdateResult},
+    bson::{doc, extjson::de::Error, oid::ObjectId},
+    results::InsertOneResult,
     sync::{Client, Collection},
 };
 use rocket::{http::Status, serde::json::Json};
+use serde::de::Error as _;
 
 use crate::models::user_model::User;
 
 pub struct MongoRepo {
     col: Collection<User>,
 }
-
-// #[derive(Debug)]
-// pub struct MyError {
-//     message: String,
-// }
 
 impl MongoRepo {
     pub fn init() -> Self {
@@ -42,6 +37,8 @@ impl MongoRepo {
     }
 
     pub fn register_user(&self, new_user: User) -> Result<InsertOneResult, Error> {
+        let filter = doc! {"email": new_user.email.clone()};
+
         let role = if new_user.role == true {
             new_user.role
         } else {
@@ -59,13 +56,23 @@ impl MongoRepo {
             role,
         };
 
-        let user = self
+        let user_detail = self
             .col
-            .insert_one(new_doc, None)
+            .find_one(filter, None)
             .ok()
-            .expect("Error in creating user");
+            .expect("Error getting user's detail");
 
-        Ok(user)
+        if !user_detail.is_some() {
+            let user = self
+                .col
+                .insert_one(new_doc, None)
+                .ok()
+                .expect("Error in creating user");
+
+            return Ok(user);
+        } else {
+            return Err(Error::custom("User already exists"));
+        }
     }
 
     pub fn get_user(&self, id: &String) -> Result<User, Error> {
@@ -86,7 +93,6 @@ impl MongoRepo {
             .ok()
             .expect("Error getting list of users");
 
-        println!("{:#?}", cursors);
         let users = cursors.map(|doc| doc.unwrap()).collect();
         Ok(users)
     }
@@ -101,35 +107,29 @@ impl MongoRepo {
         Ok(user_detail.unwrap())
     }
 
-
-        pub fn user_login(
-        &self, 
+    pub fn user_login(
+        &self,
         email: &String,
-        provided_password:&String,
-    ) -> Result<Json<String>, Status> {
-
+        provided_password: &String,
+    ) -> Result<Json<String>, Json<String>> {
         let user_result = self.get_user_using_email(email);
-        
+
         let user = match user_result {
             Ok(user) => user,
-            _ => return Err(Status::Unauthorized),
+            _ => return Err(Json("User does not exist".to_string())),
         };
 
         let stored_password = user.password.clone();
 
-        println!("{:?}", stored_password);
-
         match verify(provided_password, &stored_password) {
-            Ok(valid) =>{
+            Ok(valid) => {
                 if valid {
                     return Ok(Json("Login Successful".to_string()));
                 } else {
-                    return Err(Status::Unauthorized);
+                    return Err(Json("Invalid Password".to_string()));
                 }
             }
-            Err(_) => return Err(Status::InternalServerError),
+            Err(_) => return Err(Json("Error in verifying password".to_string())),
         };
     }
-
-
 }
